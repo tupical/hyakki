@@ -1,4 +1,4 @@
-//! Read-only coordination over host-supplied pipeline snapshots.
+//! Read-only coordination over host-supplied pipeline and task snapshots.
 //!
 //! No clock, storage, routing, maturity assessment or side effects.
 //! All times are Unix milliseconds; durations are unsigned milliseconds.
@@ -331,6 +331,134 @@ fn loop_layer(error: &str) -> Option<Layer> {
         "daruma" => Some(Layer::Daruma),
         _ => None,
     }
+}
+
+// ---------------------------------------------------------------------------
+// v1: task snapshots
+// ---------------------------------------------------------------------------
+
+/// Task status as the stall rules need it. The host maps its own statuses;
+/// `Blocked` is for a task the host knows is blocked (daruma has no such
+/// status — a blocking relation, say). Neither `Blocked` nor `Inbox` (the
+/// triage queue) counts as a stall.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    Inbox,
+    Todo,
+    InProgress,
+    InReview,
+    Blocked,
+    Done,
+    Cancelled,
+}
+
+/// A live claim on a task by an agent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimSnapshot {
+    pub agent_id: String,
+    pub expires_at: Timestamp,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskSnapshot {
+    pub task_id: String,
+    pub status: TaskStatus,
+    /// When the task entered `status`; stall age is measured from here.
+    pub status_since: Timestamp,
+    pub claim: Option<ClaimSnapshot>,
+    pub updated_at: Timestamp,
+}
+
+/// A task stalls strictly after these durations in its status.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskThresholds {
+    pub in_progress: Milliseconds,
+    pub in_review: Milliseconds,
+    /// `todo`.
+    pub other_open: Milliseconds,
+}
+
+const HOUR: Milliseconds = 60 * 60 * 1_000;
+
+impl Default for TaskThresholds {
+    /// 24 h in progress, a week in review and in todo.
+    fn default() -> Self {
+        Self {
+            in_progress: 24 * HOUR,
+            in_review: 168 * HOUR,
+            other_open: 168 * HOUR,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStall {
+    InProgressTooLong,
+    InReviewTooLong,
+    OpenTooLong,
+    /// In progress while the claiming agent's claim has expired: the agent is gone.
+    ClaimExpired,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskSignal {
+    pub task_id: String,
+    pub status: TaskStatus,
+    /// Full time in the status, not just the excess over the threshold.
+    pub stalled_for: Milliseconds,
+    pub reason: TaskStall,
+}
+
+/// Stall signals for the tasks that need attention, without reading the clock.
+///
+/// Done, cancelled, blocked and inbox tasks never signal (blocked has its
+/// reason, inbox is the triage queue).
+/// A status is stalled strictly after its threshold. An in-progress task whose
+/// claim expired before `now` signals `ClaimExpired` whatever its age, taking
+/// precedence over `InProgressTooLong`. A `status_since` in the future (host
+/// clock skew) never signals. Output: longest `stalled_for` first, then
+/// `task_id`.
+pub fn project_tasks(
+    tasks: &[TaskSnapshot],
+    now: Timestamp,
+    thresholds: &TaskThresholds,
+) -> Vec<TaskSignal> {
+    let mut signals: Vec<TaskSignal> = tasks
+        .iter()
+        .filter_map(|task| {
+            if task.status_since > now {
+                return None;
+            }
+            let age = now.abs_diff(task.status_since);
+            let reason = match task.status {
+                TaskStatus::InProgress
+                    if task.claim.as_ref().is_some_and(|c| c.expires_at < now) =>
+                {
+                    TaskStall::ClaimExpired
+                }
+                TaskStatus::InProgress if age > thresholds.in_progress => {
+                    TaskStall::InProgressTooLong
+                }
+                TaskStatus::InReview if age > thresholds.in_review => TaskStall::InReviewTooLong,
+                TaskStatus::Todo if age > thresholds.other_open => TaskStall::OpenTooLong,
+                _ => return None,
+            };
+            Some(TaskSignal {
+                task_id: task.task_id.clone(),
+                status: task.status,
+                stalled_for: age,
+                reason,
+            })
+        })
+        .collect();
+    signals.sort_by(|a, b| {
+        b.stalled_for
+            .cmp(&a.stalled_for)
+            .then_with(|| a.task_id.cmp(&b.task_id))
+    });
+    signals
 }
 
 #[cfg(test)]

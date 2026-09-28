@@ -1,6 +1,6 @@
 [package]
 name = "hyakki"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.80"
 description = "Read-only procession state projection for the Meisei coordination layer"

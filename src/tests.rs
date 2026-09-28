@@ -374,3 +374,147 @@ fn run_snapshot_serde_roundtrip() {
         entry
     );
 }
+
+// ---------------------------------------------------------------------------
+// v1: task snapshots
+// ---------------------------------------------------------------------------
+
+fn task(id: &str, status: TaskStatus, age: Milliseconds) -> TaskSnapshot {
+    TaskSnapshot {
+        task_id: id.into(),
+        status,
+        status_since: T0 - age as Timestamp,
+        claim: None,
+        updated_at: T0,
+    }
+}
+
+fn signals(tasks: &[TaskSnapshot]) -> Vec<TaskSignal> {
+    project_tasks(tasks, T0, &TaskThresholds::default())
+}
+
+#[test]
+fn task_thresholds_default_to_owner_values() {
+    let t = TaskThresholds::default();
+    assert_eq!(
+        (t.in_progress, t.in_review, t.other_open),
+        (24 * HOUR, 168 * HOUR, 168 * HOUR)
+    );
+}
+
+#[test]
+fn each_status_stalls_strictly_after_its_threshold() {
+    let t = TaskThresholds::default();
+    for (status, threshold, reason) in [
+        (
+            TaskStatus::InProgress,
+            t.in_progress,
+            TaskStall::InProgressTooLong,
+        ),
+        (
+            TaskStatus::InReview,
+            t.in_review,
+            TaskStall::InReviewTooLong,
+        ),
+        (TaskStatus::Todo, t.other_open, TaskStall::OpenTooLong),
+    ] {
+        assert!(
+            signals(&[task("t", status, threshold)]).is_empty(),
+            "{status:?} exactly at the threshold"
+        );
+        assert_eq!(
+            signals(&[task("t", status, threshold + 1)]),
+            vec![TaskSignal {
+                task_id: "t".into(),
+                status,
+                stalled_for: threshold + 1,
+                reason,
+            }],
+            "{status:?} one ms past it"
+        );
+    }
+}
+
+#[test]
+fn terminal_blocked_and_inbox_tasks_never_signal() {
+    for status in [
+        TaskStatus::Done,
+        TaskStatus::Cancelled,
+        TaskStatus::Blocked,
+        TaskStatus::Inbox,
+    ] {
+        let mut stale = task("t", status, 1_000 * HOUR);
+        stale.claim = Some(ClaimSnapshot {
+            agent_id: "a".into(),
+            expires_at: T0 - 1,
+        });
+        assert!(signals(&[stale]).is_empty(), "{status:?}");
+    }
+}
+
+#[test]
+fn expired_claim_wins_over_age_and_ignores_the_threshold() {
+    let claim = |expires_at| {
+        Some(ClaimSnapshot {
+            agent_id: "agent".into(),
+            expires_at,
+        })
+    };
+    // Young task, agent gone: signals anyway.
+    let mut young = task("young", TaskStatus::InProgress, HOUR);
+    young.claim = claim(T0 - 1);
+    // Old task, agent gone: ClaimExpired, not InProgressTooLong.
+    let mut old = task("old", TaskStatus::InProgress, 48 * HOUR);
+    old.claim = claim(T0 - 1);
+    // Claim expiring exactly now is still live.
+    let mut live = task("live", TaskStatus::InProgress, HOUR);
+    live.claim = claim(T0);
+    let out = signals(&[young, old, live]);
+    assert_eq!(
+        out.iter()
+            .map(|s| (s.task_id.as_str(), s.reason))
+            .collect::<Vec<_>>(),
+        [
+            ("old", TaskStall::ClaimExpired),
+            ("young", TaskStall::ClaimExpired)
+        ]
+    );
+    // An expired claim on a task in review does not matter.
+    let mut review = task("r", TaskStatus::InReview, HOUR);
+    review.claim = claim(T0 - 1);
+    assert!(signals(&[review]).is_empty());
+}
+
+#[test]
+fn future_status_since_never_signals() {
+    let mut skewed = task("t", TaskStatus::InProgress, 0);
+    skewed.status_since = T0 + 1;
+    skewed.claim = Some(ClaimSnapshot {
+        agent_id: "a".into(),
+        expires_at: T0 - 1,
+    });
+    assert!(signals(&[skewed]).is_empty());
+}
+
+#[test]
+fn signals_sort_by_age_then_id_and_empty_input_is_empty() {
+    let out = signals(&[
+        task("b", TaskStatus::Todo, 200 * HOUR),
+        task("c", TaskStatus::InProgress, 30 * HOUR),
+        task("a", TaskStatus::Todo, 200 * HOUR),
+        task("d", TaskStatus::Done, 900 * HOUR),
+    ]);
+    assert_eq!(
+        out.iter().map(|s| s.task_id.as_str()).collect::<Vec<_>>(),
+        ["a", "b", "c"]
+    );
+    assert!(signals(&[]).is_empty());
+}
+
+#[test]
+fn task_signal_serializes_snake_case() {
+    let json =
+        serde_json::to_value(&signals(&[task("t", TaskStatus::InReview, 169 * HOUR)])[0]).unwrap();
+    assert_eq!(json["status"], "in_review");
+    assert_eq!(json["reason"], "in_review_too_long");
+}

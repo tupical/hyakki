@@ -52,9 +52,27 @@ pub fn project(runs: &[RunSnapshot], now: Timestamp, thresholds: &Thresholds)
 
 All types are serde-serializable; see the rustdoc in `src/lib.rs`.
 
+## v1: task snapshots
+
+```rust
+pub fn project_tasks(tasks: &[TaskSnapshot], now: Timestamp, thresholds: &TaskThresholds)
+    -> Vec<TaskSignal>;
+```
+
+- Input is a host snapshot of tasks (`TaskSnapshot`: status, since when it
+  holds, the agent's claim); output is stall signals (`TaskSignal`). Still
+  read-only: no clock, storage or side effects.
+- `TaskThresholds::default()` — in_progress 24 h, in_review and todo a week;
+  a task stalls strictly after its threshold.
+- `ClaimExpired` — in progress while the agent's claim has expired: the agent
+  is gone. It beats `InProgressTooLong` and does not wait for the threshold.
+- Done, cancelled, blocked and inbox (the triage queue) never signal; neither
+  does a `status_since` in the future (host clock skew). Order: longest stall first, then `task_id`.
+
 ## Decision
 
-[ADR-0020: Hyakki v0 — read-only procession projection](https://github.com/tupical/meisei.ru/blob/main/adr/0020-hyakki-v0-read-only-procession-projection.md)
+[ADR-0020: Hyakki v0 — read-only procession projection](https://github.com/tupical/meisei.ru/blob/main/adr/0020-hyakki-v0-read-only-procession-projection.md),
+[ADR-0021: Hyakki v1 — task stall signals](https://github.com/tupical/meisei.ru/blob/main/adr/0021-hyakki-v1-task-stall-signals.md)
 (all ADRs: [meisei.ru/adr](https://github.com/tupical/meisei.ru/tree/main/adr)).
 
 ## License

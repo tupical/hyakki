@@ -54,9 +54,27 @@ pub fn project(runs: &[RunSnapshot], now: Timestamp, thresholds: &Thresholds)
 
 Все типы сериализуются через serde; подробности — rustdoc в `src/lib.rs`.
 
+## v1: снимок задач
+
+```rust
+pub fn project_tasks(tasks: &[TaskSnapshot], now: Timestamp, thresholds: &TaskThresholds)
+    -> Vec<TaskSignal>;
+```
+
+- Вход — снимок задач от хоста (`TaskSnapshot`: статус, с какого момента он
+  держится, claim агента); выход — сигналы простоя (`TaskSignal`). Всё так же
+  read-only: без часов, хранилища и побочных эффектов.
+- `TaskThresholds::default()` — in_progress 24 ч, in_review и todo неделя;
+  сигнал строго после порога.
+- `ClaimExpired` — задача в работе, а claim агента истёк: агент пропал. Он
+  приоритетнее `InProgressTooLong` и не ждёт порога.
+- Done, cancelled, blocked и inbox (очередь разбора) не сигналят;
+  `status_since` в будущем (сбитые часы хоста) — тоже. Порядок: сначала дольше простой, затем `task_id`.
+
 ## Решение
 
-[ADR-0020: Hyakki v0 — read-only проекция процессии](https://github.com/tupical/meisei.ru/blob/main/adr/0020-hyakki-v0-read-only-procession-projection.md)
+[ADR-0020: Hyakki v0 — read-only проекция процессии](https://github.com/tupical/meisei.ru/blob/main/adr/0020-hyakki-v0-read-only-procession-projection.md),
+[ADR-0021: Hyakki v1 — сигналы простоя задач](https://github.com/tupical/meisei.ru/blob/main/adr/0021-hyakki-v1-task-stall-signals.md)
 (все ADR: [meisei.ru/adr](https://github.com/tupical/meisei.ru/tree/main/adr)).
 
 ## Лицензия
