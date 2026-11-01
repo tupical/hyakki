@@ -71,9 +71,10 @@ pub fn project_tasks(tasks: &[TaskSnapshot], now: Timestamp, thresholds: &TaskTh
 
 ## Decision
 
-[ADR-0020: Hyakki v0 — read-only procession projection](https://github.com/tupical/meisei.ru/blob/main/adr/0020-hyakki-v0-read-only-procession-projection.md),
-[ADR-0021: Hyakki v1 — task stall signals](https://github.com/tupical/meisei.ru/blob/main/adr/0021-hyakki-v1-task-stall-signals.md)
-(all ADRs: [meisei.ru/adr](https://github.com/tupical/meisei.ru/tree/main/adr)).
+ADR-0020 (Hyakki v0 — read-only procession projection) and ADR-0021
+(Hyakki v1 — task stall signals). Meisei ADRs are kept in a private design
+repository and are not publicly accessible; the contract they fix is
+summarised in the sections above.
 
 ## License
 
