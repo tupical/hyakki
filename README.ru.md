@@ -73,9 +73,10 @@ pub fn project_tasks(tasks: &[TaskSnapshot], now: Timestamp, thresholds: &TaskTh
 
 ## Решение
 
-[ADR-0020: Hyakki v0 — read-only проекция процессии](https://github.com/tupical/meisei.ru/blob/main/adr/0020-hyakki-v0-read-only-procession-projection.md),
-[ADR-0021: Hyakki v1 — сигналы простоя задач](https://github.com/tupical/meisei.ru/blob/main/adr/0021-hyakki-v1-task-stall-signals.md)
-(все ADR: [meisei.ru/adr](https://github.com/tupical/meisei.ru/tree/main/adr)).
+ADR-0020 (Hyakki v0 — read-only проекция процессии) и ADR-0021
+(Hyakki v1 — сигналы простоя задач). ADR Meisei хранятся в приватном
+репозитории проектирования и публично недоступны; зафиксированный ими контракт
+кратко изложен в разделах выше.
 
 ## Лицензия
 
